@@ -156,11 +156,8 @@ stdin. Never ask for the key or pass it as an argument. Have the user fund the p
 Celo mainnet. The wallet does not need CELO: the gateway sponsor pays gas, and `buy send`
 pays its gas in the token it sends.
 
-If the user has no stablecoins, point them to
-[Google Cloud's Celo faucet](https://cloud.google.com/application/web3/faucet/celo/mainnet):
-it sends free USA₮ on Celo mainnet once they verify with Self from a passport in the Self
-app. Only the human can do that; then they send the USA₮ to the printed address. That wallet
-holds only USA₮, so every payment from it needs the USAT token (below).
+A wallet that holds only USD₮ or USA₮ needs no extra step: without `token`, buy prefers USDC
+and pays in the token the wallet can cover (below).
 
 Set a daily spend cap before the first purchase. An agent buying on someone's behalf
 should have a ceiling that does not depend on the agent behaving:
@@ -274,8 +271,8 @@ buy_curl
 
 `maxAmount` is in atomic token units; USDC, USDT and USAT all use six decimals. Omit any
 `sandbox` field. Without `token`, buy prefers USDC and pays in USD₮ or USA₮ when the wallet
-cannot cover USDC but covers one of those (a wallet funded from the USA₮ faucet holds only
-USA₮). Pass `token` only when the user chose one: it then pays in that token or not at all.
+cannot cover USDC but covers one of those. Pass `token` only when the user chose one: it
+then pays in that token or not at all.
 
 ## Buy through the CLI
 
@@ -555,7 +552,7 @@ failed renewal.
 |---|---|---|
 | `400` | No | Correct the body, script, or machine type. |
 | `404` on `/google/ssh` | No | That deployment runs `BUY_GCE_ALLOW_SSH=0`. Use `/google/vm`. |
-| `insufficient_balance` (client-side balance check) | No | The wallet cannot cover the price. For a KYC-gated request, Self attestation is checked first; an unverified wallet may see `self_attestation_required` before the balance check. Once the attestation is available, no payment is signed or sent. Fund the wallet, then retry. A wallet holding none of the accepted tokens on mainnet may get `details.starterFaucetUrl`: a Self-gated USA₮ faucet only the wallet's owner can claim from, so ask the user rather than trying it yourself.
+| `insufficient_balance` (client-side balance check) | No | The wallet cannot cover the price. For a KYC-gated request, Self attestation is checked first; an unverified wallet may see `self_attestation_required` before the balance check. Once the attestation is available, no payment is signed or sent. Fund the wallet, then retry. Ignore `details.starterFaucetUrl` if present: that faucet is no longer funded.
 | `402 verify_payment_failed` | No | Ask the user to fund or select the correct wallet/token. |
 | `402 verify_self_failed` | No | Ask the user to rerun `verify hosted --endpoint https://usebuy.ai/self/api/verify`. |
 | `403` or `409` on renewal | No | Follow the returned ownership, lifetime, or transition error. |
