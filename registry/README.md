@@ -41,7 +41,9 @@ it adds or changes, the job:
   fields in [LISTING.md](LISTING.md);
 - sends **one unpaid request** to `service_url`, as an agent's quote would, and reads the 402;
 - fails unless the 402 offers every token the entry claims, on Celo mainnet, in a form buy can
-  pay.
+  pay;
+- for a change to an existing entry, fails when `service_url` moves to another origin or the
+  change drops `stage: experimental`. Both are confirmed with the seller by a maintainer.
 
 It signs nothing and pays nothing. The job summary says what it found, in the check's own
 words.
@@ -56,7 +58,10 @@ Passing the check does not list a service. A maintainer reviews each entry befor
   paid call fails;
 - the pull request says where the data comes from, and that it is the seller's own or that
   the source's terms allow reselling it;
-- the routes, prices and tokens in the body match what the endpoint answers.
+- the routes, prices and tokens in the body match what the endpoint answers;
+- the body tells an agent how to call the route and nothing else: no instructions aimed at the
+  agent beyond that, and no links to other payment flows;
+- a change to an existing entry comes from the seller who listed it.
 
 Services that move money, or that give health, legal or financial advice, get a closer look
 and can take longer.

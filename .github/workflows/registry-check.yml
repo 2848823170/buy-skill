@@ -81,6 +81,6 @@ jobs:
           fi
           scripts/install-pinned-core.sh @celo/buy-registry
           status=0
-          node scripts/check-registry.mjs ../pr/registry "$RUNNER_TEMP/changes.tsv" "$RUNNER_TEMP/summary.md" || status=$?
+          node scripts/check-registry.mjs ../pr/registry "$RUNNER_TEMP/changes.tsv" "$RUNNER_TEMP/summary.md" registry || status=$?
           if [ -f "$RUNNER_TEMP/summary.md" ]; then cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
           exit "$status"

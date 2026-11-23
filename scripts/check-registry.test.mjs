@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { parsePayDoc } from '@celo/buy-registry';
-import { NOTICE, RESERVED, changedEntries, checkRegistry, readEntry, summary } from './check-registry.mjs';
+import { NOTICE, RESERVED, changedEntries, checkRegistry, compareWithBase, readEntry, summary } from './check-registry.mjs';
 
 const USDC = '0xcebA9300f2b948710d2653dD7B07f33A8B32118C';
 const USAT = '0xD2ab3C9A02DBBAB236BfEC45D1d755DF4267F771';
@@ -90,9 +90,10 @@ describe('readEntry', () => {
 
   const cases = [
     ['a new entry without the experimental stage', { extra: '' }, /starts as `stage: experimental`/],
-    ['another stage value', { extra: 'stage: curated\n' }, /can only be `experimental`/],
+    // From @celo/buy-registry 0.8.7 the parser refuses these values itself.
+    ['another stage value', { extra: 'stage: curated\n' }, /can only be `experimental`|does not parse/],
     ['an experimental entry without the notice', { notice: 'Hello.' }, /experimental notice/],
-    ['service_method: GET', { extra: 'stage: experimental\nservice_method: GET\n' }, /can only be `POST`/],
+    ['service_method: GET', { extra: 'stage: experimental\nservice_method: GET\n' }, /can only be `POST`|does not parse/],
     ['a token buy cannot pay', { assets: 'USDC, cNGN' }, /USDC, USDT and USAT only/],
     ['a plain-http URL', { url: 'http://api.example.com/rates' }, /public HTTPS URL/],
     ['a private host', { url: 'https://localhost/rates' }, /public HTTPS URL/],
@@ -168,6 +169,60 @@ describe('checkRegistry', () => {
     assert.deepEqual(results.map((r) => r.ok), [false, false, false, true]);
     assert.match(results[1].detail, /reserved/);
     assert.ok(RESERVED.has('cencori') && RESERVED.has('chainstack'));
+  });
+
+  describe('a changed entry, compared with the base branch', () => {
+    const changed = [{ kind: 'changed', fqn: 'late/seller', org: 'late' }];
+    const request = async () => challenge(usdc, usat);
+
+    it('passes a change that keeps the origin and the stage', async () => {
+      const results = await checkRegistry(changed, {
+        read: () => payDoc({ url: 'https://api.example.com/rates?v=2' }),
+        readBase: () => payDoc(),
+        request,
+      });
+      assert.deepEqual(results.map((r) => r.ok), [true, true]);
+    });
+
+    it('fails a change that points the entry at another origin, before requesting it', async () => {
+      let requested = 0;
+      const results = await checkRegistry(changed, {
+        read: () => payDoc({ url: 'https://attacker.example.net/rates' }),
+        readBase: () => payDoc(),
+        request: async () => {
+          requested++;
+          return challenge(usdc, usat);
+        },
+      });
+      assert.equal(requested, 0);
+      assert.deepEqual(results.map((r) => [r.ok, r.detail]), [
+        [false, '`service_url` moves to another origin; a maintainer confirms this with the seller'],
+      ]);
+    });
+
+    it('fails a change that drops stage: experimental', async () => {
+      const results = await checkRegistry(changed, {
+        read: () => payDoc({ extra: '', notice: 'Now a reviewed listing.' }),
+        readBase: () => payDoc(),
+        request,
+      });
+      assert.ok(results.some((r) => !r.ok && r.detail === 'only a maintainer lifts `stage: experimental`'));
+    });
+
+    it('checks a changed entry with no readable base copy as if it were new', async () => {
+      const results = await checkRegistry(changed, {
+        read: () => payDoc({ extra: '', notice: 'No notice.' }),
+        readBase: () => {
+          throw new Error('ENOENT');
+        },
+        request,
+      });
+      assert.ok(results.some((r) => !r.ok && r.detail === 'a new listing starts as `stage: experimental`'));
+    });
+
+    it('compareWithBase reports nothing when either side does not parse', () => {
+      assert.deepEqual(compareWithBase('not a pay doc', payDoc(), 'late/seller'), []);
+    });
   });
 
   it('fails an entry whose file cannot be read', async () => {

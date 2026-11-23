@@ -13,12 +13,14 @@
  * The summary holds this script's own wording. A path that is not shaped like
  * `<org>/<name>/PAY.md` is reported without being echoed.
  *
- * Usage: node scripts/check-registry.mjs <registry dir> <changes file> [summary.md]
- *   <registry dir>  the pull request's `registry/` directory
- *   <changes file>  `git diff --name-status <base>...<head> -- registry/`
+ * Usage: node scripts/check-registry.mjs <registry dir> <changes file> [summary.md] [base registry dir]
+ *   <registry dir>       the pull request's `registry/` directory
+ *   <changes file>       `git diff --name-status <base>...<head> -- registry/`
+ *   <base registry dir>  the base branch's `registry/`, so a changed entry is
+ *                        compared with what it replaces
  */
 
-import { lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseFrontmatter, parsePayDoc } from '@celo/buy-registry';
@@ -105,8 +107,42 @@ export function readEntry(content, fqn, { added }) {
   };
 }
 
-/** Every check for the changed entries. `read` and `request` are injected by tests. */
-export async function checkRegistry(changes, { read, request = probe }) {
+/**
+ * What a change to an existing entry may not do on its own: move the listing to
+ * another origin (buyers would pay whoever answers there), or drop
+ * `stage: experimental`. Both are for a maintainer to confirm with the seller,
+ * so the check fails and says so. `baseContent` is the entry as it is on the
+ * base branch.
+ */
+export function compareWithBase(content, baseContent, fqn) {
+  let entry;
+  let data;
+  let base;
+  let baseData;
+  try {
+    entry = parsePayDoc(content, fqn);
+    ({ data } = parseFrontmatter(content));
+    base = parsePayDoc(baseContent, fqn);
+    ({ data: baseData } = parseFrontmatter(baseContent));
+  } catch {
+    return [];
+  }
+  const problems = [];
+  if (safeOrigin(entry.serviceUrl) !== safeOrigin(base.serviceUrl)) {
+    problems.push('`service_url` moves to another origin; a maintainer confirms this with the seller');
+  }
+  if (baseData.stage === 'experimental' && data.stage !== 'experimental') {
+    problems.push('only a maintainer lifts `stage: experimental`');
+  }
+  return problems;
+}
+
+/**
+ * Every check for the changed entries. `read`, `readBase` and `request` are
+ * injected by tests. `readBase` reads an entry from the base branch; a changed
+ * entry whose base copy cannot be read is checked as if it were new.
+ */
+export async function checkRegistry(changes, { read, readBase, request = probe }) {
   const results = [];
   const add = (ok, entry, detail) => results.push({ ok, entry, detail });
   let quoted = 0;
@@ -131,7 +167,16 @@ export async function checkRegistry(changes, { read, request = probe }) {
       add(false, fqn, 'the file cannot be read');
       continue;
     }
-    const entry = readEntry(content, fqn, { added: kind === 'added' });
+    let baseContent;
+    if (kind === 'changed') {
+      try {
+        baseContent = readBase?.(fqn);
+      } catch {
+        baseContent = undefined;
+      }
+    }
+    const entry = readEntry(content, fqn, { added: kind === 'added' || baseContent === undefined });
+    if (baseContent !== undefined) entry.problems.push(...compareWithBase(content, baseContent, fqn));
     for (const problem of entry.problems) add(false, fqn, problem);
     if (entry.problems.length > 0) continue;
     if (++quoted > MAX_ENTRIES) {
@@ -171,22 +216,26 @@ export function summary(results) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const [registryDir, changesFile, summaryFile] = process.argv.slice(2);
+  const [registryDir, changesFile, summaryFile, baseRegistryDir] = process.argv.slice(2);
   if (!registryDir || !changesFile) {
-    console.error('usage: node scripts/check-registry.mjs <registry dir> <changes file> [summary.md]');
+    console.error('usage: node scripts/check-registry.mjs <registry dir> <changes file> [summary.md] [base registry dir]');
     process.exit(2);
   }
-  const root = realpathSync(registryDir);
-  const read = (fqn) => {
-    const path = join(root, 'providers', fqn, 'PAY.md');
-    // A symlink could point the read anywhere on the runner; a listing is a
-    // plain file that resolves inside the registry directory.
-    if (!lstatSync(path).isFile() || !realpathSync(path).startsWith(root + sep)) {
-      throw new Error('not a plain file in the registry');
-    }
-    return readFileSync(path, 'utf8');
+  // A symlink could point the read anywhere on the runner; a listing is a
+  // plain file that resolves inside the registry directory.
+  const reader = (dir) => {
+    const root = realpathSync(dir);
+    return (fqn) => {
+      const path = join(root, 'providers', fqn, 'PAY.md');
+      if (!lstatSync(path).isFile() || !realpathSync(path).startsWith(root + sep)) {
+        throw new Error('not a plain file in the registry');
+      }
+      return readFileSync(path, 'utf8');
+    };
   };
-  const results = await checkRegistry(changedEntries(readFileSync(changesFile, 'utf8')), { read });
+  const read = reader(registryDir);
+  const readBase = baseRegistryDir && existsSync(baseRegistryDir) ? reader(baseRegistryDir) : undefined;
+  const results = await checkRegistry(changedEntries(readFileSync(changesFile, 'utf8')), { read, readBase });
   const text = summary(results);
   process.stdout.write(text);
   if (summaryFile) writeFileSync(summaryFile, text);
