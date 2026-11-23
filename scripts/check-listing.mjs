@@ -362,7 +362,7 @@ export async function checkRequest({ title, body }, request = probe) {
       add(FAIL, 'Tokens', `the form lists ${missing.join(', ')}, the 402 does not offer it`);
     }
     if (!live.has('USAT')) {
-      add(WARN, 'USA₮', 'not offered; wallets funded from the USA₮ faucet hold nothing else');
+      add(WARN, 'USA₮', 'not offered; buyers whose wallet holds only USA₮ cannot pay');
     }
     add(
       discoverable ? PASS : WARN,
